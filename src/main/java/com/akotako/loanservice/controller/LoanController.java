@@ -2,6 +2,7 @@ package com.akotako.loanservice.controller;
 
 import com.akotako.loanservice.model.entity.Loan;
 import com.akotako.loanservice.model.entity.LoanInstallment;
+import com.akotako.loanservice.model.response.PayLoanResult;
 import com.akotako.loanservice.model.response.ResponseObject;
 import com.akotako.loanservice.service.LoanService;
 import lombok.RequiredArgsConstructor;
@@ -37,4 +38,12 @@ public class LoanController {
         List<LoanInstallment> installments = loanService.listInstallments(loanId);
         return ResponseEntity.ok(ResponseObject.success(installments));
     }
+
+    @PostMapping("/pay")
+    public ResponseEntity<ResponseObject<PayLoanResult>> payLoan(@RequestParam Long loanId,
+                                                                 @RequestParam Double paymentAmount) {
+        PayLoanResult result = loanService.payLoan(loanId, paymentAmount);
+        return ResponseEntity.ok(ResponseObject.success(result));
+    }
+
 }

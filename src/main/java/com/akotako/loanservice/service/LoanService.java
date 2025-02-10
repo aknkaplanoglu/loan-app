@@ -3,6 +3,8 @@ package com.akotako.loanservice.service;
 import com.akotako.loanservice.model.entity.Customer;
 import com.akotako.loanservice.model.entity.Loan;
 import com.akotako.loanservice.model.entity.LoanInstallment;
+import com.akotako.loanservice.model.exception.*;
+import com.akotako.loanservice.model.response.PayLoanResult;
 import com.akotako.loanservice.repository.CustomerRepository;
 import com.akotako.loanservice.repository.LoanInstallmentRepository;
 import com.akotako.loanservice.repository.LoanRepository;
@@ -11,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 @Service
@@ -76,4 +79,47 @@ public class LoanService {
     public List<LoanInstallment> listInstallments(Long loanId) {
         return installmentRepository.findByLoanId(loanId);
     }
+
+    @Transactional
+    public PayLoanResult payLoan(Long loanId, Double paymentAmount) {
+        Loan loan = loanRepository.findById(loanId)
+                .orElseThrow(() -> new LoanNotFoundException("Loan not found."));
+
+        List<LoanInstallment> installments = installmentRepository
+                .findByLoanIdAndIsPaidFalseAndDueDateBeforeOrderByDueDateAsc(loanId, LocalDate.now().plusMonths(3).withDayOfMonth(1));
+
+        if (installments.isEmpty()) {
+            throw new LoanInstallmentNotFoundException("No installments available for payment within the allowed period.");
+        }
+
+        double remainingAmount = paymentAmount;
+        int paidInstallmentsCount = 0;
+        double totalPaidAmount = 0.0;
+
+        for (LoanInstallment installment : installments) {
+            if (remainingAmount >= installment.getAmount()) {
+                remainingAmount -= installment.getAmount();
+                totalPaidAmount += installment.getAmount();
+                installment.setPaidAmount(installment.getAmount());
+                installment.setPaymentDate(LocalDate.now());
+                installment.setIsPaid(true);
+                installmentRepository.save(installment);
+                paidInstallmentsCount++;
+            } else {
+                break;
+            }
+        }
+
+        if (isAllInstallmentsPaid(loanId)) {
+            loan.setIsPaid(true);
+            loanRepository.save(loan);
+        }
+
+        return new PayLoanResult(paidInstallmentsCount, totalPaidAmount, loan.getIsPaid());
+    }
+
+    private boolean isAllInstallmentsPaid(Long loanId) {
+        return installmentRepository.findByLoanId(loanId).stream().allMatch(LoanInstallment::getIsPaid);
+    }
+
 }
