@@ -111,6 +111,10 @@ All exceptions return a consistent JSON format:
 }
 ```
 ## NOTES TO RUN
+```bash
+docker build -t loan-app .
+docker run -p 8080:8080 loan-app
+```
 
 - Please register and login first
 - please get the token after login and use it afterwards in each request auth header
