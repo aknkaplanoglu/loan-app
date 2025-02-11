@@ -29,17 +29,11 @@ public class LoanController {
     }
 
     @PreAuthorize("hasAnyRole('ADMIN', 'CUSTOMER')")
-    @GetMapping("/customers/{customerId}")
-    public ResponseEntity<ResponseObject<List<Loan>>> listLoans(@PathVariable Long customerId) {
+    @GetMapping
+    public ResponseEntity<ResponseObject<List<Loan>>> listLoans(
+            @RequestParam(value = "customerId", required = false) Long customerId) {
         List<Loan> loans = loanService.listLoans(customerId);
         return ResponseEntity.ok(ResponseObject.success(loans));
-    }
-
-    @PreAuthorize("hasRole('ADMIN') or @loanService.isLoanOwner(#loanId, authentication.name)")
-    @GetMapping("/installments/{loanId}")
-    public ResponseEntity<ResponseObject<List<LoanInstallment>>> listInstallments(@PathVariable Long loanId) {
-        List<LoanInstallment> installments = loanService.listInstallments(loanId);
-        return ResponseEntity.ok(ResponseObject.success(installments));
     }
 
     @PreAuthorize("hasRole('ADMIN') or @loanService.isLoanOwner(#loanId, authentication.name)")
