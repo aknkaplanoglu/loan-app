@@ -2,13 +2,17 @@ package com.akotako.loanservice.controller;
 
 import com.akotako.loanservice.model.entity.Loan;
 import com.akotako.loanservice.model.entity.LoanInstallment;
+import com.akotako.loanservice.model.request.CreateLoanRequest;
 import com.akotako.loanservice.model.response.PayLoanResult;
 import com.akotako.loanservice.model.response.ResponseObject;
 import com.akotako.loanservice.service.LoanService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @RestController
@@ -17,31 +21,31 @@ import java.util.List;
 public class LoanController {
     private final LoanService loanService;
 
-
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping
-    public ResponseEntity<ResponseObject<Loan>> createLoan(@RequestParam Long customerId,
-                                                           @RequestParam Double amount,
-                                                           @RequestParam Double interestRate,
-                                                           @RequestParam Integer installments) {
-        Loan loan = loanService.createLoan(customerId, amount, interestRate, installments);
+    public ResponseEntity<ResponseObject<Loan>> createLoan(@RequestBody @Valid CreateLoanRequest request) {
+        Loan loan = loanService.createLoan(request);
         return ResponseEntity.ok(ResponseObject.success(loan));
     }
 
-    @GetMapping("/{customerId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CUSTOMER')")
+    @GetMapping("/customers/{customerId}")
     public ResponseEntity<ResponseObject<List<Loan>>> listLoans(@PathVariable Long customerId) {
         List<Loan> loans = loanService.listLoans(customerId);
         return ResponseEntity.ok(ResponseObject.success(loans));
     }
 
+    @PreAuthorize("hasRole('ADMIN') or @loanService.isLoanOwner(#loanId, authentication.name)")
     @GetMapping("/installments/{loanId}")
     public ResponseEntity<ResponseObject<List<LoanInstallment>>> listInstallments(@PathVariable Long loanId) {
         List<LoanInstallment> installments = loanService.listInstallments(loanId);
         return ResponseEntity.ok(ResponseObject.success(installments));
     }
 
+    @PreAuthorize("hasRole('ADMIN') or @loanService.isLoanOwner(#loanId, authentication.name)")
     @PostMapping("/pay")
     public ResponseEntity<ResponseObject<PayLoanResult>> payLoan(@RequestParam Long loanId,
-                                                                 @RequestParam Double paymentAmount) {
+                                                                 @RequestParam BigDecimal paymentAmount) {
         PayLoanResult result = loanService.payLoan(loanId, paymentAmount);
         return ResponseEntity.ok(ResponseObject.success(result));
     }

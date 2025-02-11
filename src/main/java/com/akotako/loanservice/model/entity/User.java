@@ -1,23 +1,22 @@
 package com.akotako.loanservice.model.entity;
 
+import com.akotako.loanservice.model.Role;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-import java.math.BigDecimal;
-
 @EqualsAndHashCode(callSuper = true)
-@Data
 @Entity
-@Table(name = "customers")
-public class Customer extends BaseEntity {
-
-    private String name;
-    private String surname;
+@Data
+@Table(name = "users")
+public class User extends BaseEntity {
 
     @Column(unique = true, nullable = false)
     private String username;
 
-    private BigDecimal creditLimit;
-    private BigDecimal usedCreditLimit = BigDecimal.ZERO;
+    @Column(nullable = false)
+    private String password;
+
+    @Enumerated(EnumType.STRING)
+    private Role role;
 }

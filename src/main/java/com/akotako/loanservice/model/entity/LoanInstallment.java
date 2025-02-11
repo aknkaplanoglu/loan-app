@@ -1,24 +1,27 @@
 package com.akotako.loanservice.model.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Entity;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
+@EqualsAndHashCode(callSuper = true)
 @Data
 @Entity
 @Table(name = "loan_installments")
-public class LoanInstallment {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+public class LoanInstallment extends BaseEntity {
 
     @ManyToOne
     @JoinColumn(name = "loan_id", nullable = false)
     private Loan loan;
 
-    private Double amount;
-    private Double paidAmount = 0.0;
+    private BigDecimal amount;
+    private BigDecimal paidAmount = BigDecimal.ZERO;
 
     private LocalDate dueDate;
     private LocalDate paymentDate;

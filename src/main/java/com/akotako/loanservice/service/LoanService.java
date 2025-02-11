@@ -4,58 +4,72 @@ import com.akotako.loanservice.model.entity.Customer;
 import com.akotako.loanservice.model.entity.Loan;
 import com.akotako.loanservice.model.entity.LoanInstallment;
 import com.akotako.loanservice.model.exception.*;
+import com.akotako.loanservice.model.request.CreateLoanRequest;
 import com.akotako.loanservice.model.response.PayLoanResult;
 import com.akotako.loanservice.repository.CustomerRepository;
 import com.akotako.loanservice.repository.LoanInstallmentRepository;
 import com.akotako.loanservice.repository.LoanRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 @Service
+@RequiredArgsConstructor
+@Slf4j
 public class LoanService {
+
     private final CustomerRepository customerRepository;
     private final LoanRepository loanRepository;
     private final LoanInstallmentRepository installmentRepository;
+    @Value("${loan.reward-penalty.constant:0.001}")
+    private BigDecimal rewardPenaltyConstant;
 
-    public LoanService(CustomerRepository customerRepository, LoanRepository loanRepository,
-                       LoanInstallmentRepository installmentRepository) {
-        this.customerRepository = customerRepository;
-        this.loanRepository = loanRepository;
-        this.installmentRepository = installmentRepository;
-    }
 
     @Transactional
-    public Loan createLoan(Long customerId, Double amount, Double interestRate, Integer installments) {
-        if (installments != 6 && installments != 9 && installments != 12 && installments != 24) {
-            throw new InvalidLoanRequestException("Number of installments must be 6, 9, 12, or 24.");
-        }
-        if (interestRate < 0.1 || interestRate > 0.5) {
-            throw new InvalidLoanRequestException("Interest rate must be between 0.1 and 0.5.");
-        }
+    public Loan createLoan(CreateLoanRequest request) {
 
-        Customer customer = customerRepository.findById(customerId)
+        Customer customer = customerRepository.findById(request.getCustomerId())
                 .orElseThrow(() -> new CustomerNotFoundException("Customer not found."));
 
-        Double totalAmount = amount * (1 + interestRate);
-        if (customer.getUsedCreditLimit() + totalAmount > customer.getCreditLimit()) {
+        BigDecimal totalAmount = request.getAmount().multiply(BigDecimal.valueOf(1 + request.getInterestRate()));
+        if (customer.getUsedCreditLimit().add(totalAmount).compareTo(customer.getCreditLimit()) > 0) {
             throw new LoanLimitExceededException("Customer does not have enough credit limit.");
         }
 
+        int installments = Integer.parseInt(request.getInstallments());
         Loan loan = new Loan();
         loan.setCustomer(customer);
         loan.setLoanAmount(totalAmount);
         loan.setNumberOfInstallments(installments);
-        loan.setInterestRate(interestRate);
+        loan.setInterestRate(request.getInterestRate());
 
         loanRepository.save(loan);
 
+        populateInstallments(totalAmount, installments, loan);
+
+        customer.setUsedCreditLimit(customer.getUsedCreditLimit().add(totalAmount));
+        customerRepository.save(customer);
+        log.info("Created loan with credit limit {} for customer: {}", customer.getCreditLimit(), request.getCustomerId());
+
+        return loan;
+    }
+
+    private void populateInstallments(BigDecimal totalAmount, int installments, Loan loan) {
         List<LoanInstallment> installmentsList = new ArrayList<>();
-        Double installmentAmount = totalAmount / installments;
+        BigDecimal installmentAmount = totalAmount.divide(
+                BigDecimal.valueOf(installments),
+                2,
+                RoundingMode.HALF_UP
+        );
         for (int i = 1; i <= installments; i++) {
             LoanInstallment installment = new LoanInstallment();
             installment.setLoan(loan);
@@ -65,11 +79,6 @@ public class LoanService {
             installmentsList.add(installment);
         }
         installmentRepository.saveAll(installmentsList);
-
-        customer.setUsedCreditLimit(customer.getUsedCreditLimit() + totalAmount);
-        customerRepository.save(customer);
-
-        return loan;
     }
 
     public List<Loan> listLoans(Long customerId) {
@@ -80,27 +89,37 @@ public class LoanService {
         return installmentRepository.findByLoanId(loanId);
     }
 
+    public boolean isLoanOwner(Long loanId, String username) {
+        Loan loan = loanRepository.findById(loanId)
+                .orElseThrow(() -> new LoanAppException("Loan not found."));
+        Customer customer = loan.getCustomer();
+        return customer.getUsername().equals(username);
+    }
+
     @Transactional
-    public PayLoanResult payLoan(Long loanId, Double paymentAmount) {
+    public PayLoanResult payLoan(Long loanId, BigDecimal paymentAmount) {
         Loan loan = loanRepository.findById(loanId)
                 .orElseThrow(() -> new LoanNotFoundException("Loan not found."));
 
-        List<LoanInstallment> installments = installmentRepository
-                .findByLoanIdAndIsPaidFalseAndDueDateBeforeOrderByDueDateAsc(loanId, LocalDate.now().plusMonths(3).withDayOfMonth(1));
+        List<LoanInstallment> installments = installmentRepository.findByLoanIdAndIsPaidFalseAndDueDateBeforeOrderByDueDateAsc(
+                loanId, LocalDate.now().plusMonths(3).withDayOfMonth(2));
 
         if (installments.isEmpty()) {
             throw new LoanInstallmentNotFoundException("No installments available for payment within the allowed period.");
         }
 
-        double remainingAmount = paymentAmount;
+        BigDecimal remainingAmount = paymentAmount;
         int paidInstallmentsCount = 0;
-        double totalPaidAmount = 0.0;
+        BigDecimal totalPaidAmount = BigDecimal.ZERO;
 
         for (LoanInstallment installment : installments) {
-            if (remainingAmount >= installment.getAmount()) {
-                remainingAmount -= installment.getAmount();
-                totalPaidAmount += installment.getAmount();
-                installment.setPaidAmount(installment.getAmount());
+            BigDecimal adjustedAmount = installment.getAmount();
+            adjustedAmount = recalculatePaymentAmount(installment, adjustedAmount);
+
+            if (remainingAmount.compareTo(adjustedAmount) >= 0) {
+                remainingAmount = remainingAmount.subtract(adjustedAmount);
+                totalPaidAmount = totalPaidAmount.add(adjustedAmount);
+                installment.setPaidAmount(adjustedAmount);
                 installment.setPaymentDate(LocalDate.now());
                 installment.setIsPaid(true);
                 installmentRepository.save(installment);
@@ -110,6 +129,7 @@ public class LoanService {
             }
         }
 
+        // can be async
         if (isAllInstallmentsPaid(loanId)) {
             loan.setIsPaid(true);
             loanRepository.save(loan);
@@ -117,6 +137,18 @@ public class LoanService {
 
         return new PayLoanResult(paidInstallmentsCount, totalPaidAmount, loan.getIsPaid());
     }
+
+    private BigDecimal recalculatePaymentAmount(LoanInstallment installment, BigDecimal adjustedAmount) {
+        long daysDifference = ChronoUnit.DAYS.between(LocalDate.now(), installment.getDueDate());
+
+        if (daysDifference > 0) {
+            adjustedAmount = adjustedAmount.subtract(installment.getAmount().multiply(rewardPenaltyConstant).multiply(BigDecimal.valueOf(daysDifference))); // early
+        } else if (daysDifference < 0) {
+            adjustedAmount = adjustedAmount.add(installment.getAmount().multiply(rewardPenaltyConstant).multiply(BigDecimal.valueOf(Math.abs(daysDifference)))); // late
+        }
+        return adjustedAmount;
+    }
+
 
     private boolean isAllInstallmentsPaid(Long loanId) {
         return installmentRepository.findByLoanId(loanId).stream().allMatch(LoanInstallment::getIsPaid);
