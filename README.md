@@ -112,6 +112,7 @@ All exceptions return a consistent JSON format:
 ```
 ## NOTES TO RUN
 ```bash
+mvn clean package
 docker build -t loan-app .
 docker run -p 8080:8080 loan-app
 ```
